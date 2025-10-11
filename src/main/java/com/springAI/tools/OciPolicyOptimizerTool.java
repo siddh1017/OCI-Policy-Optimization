@@ -16,6 +16,7 @@ public class OciPolicyOptimizerTool {
     Logger logger = Logger.getLogger((OciPolicyOptimizerTool.class).toString());
 
     private final OCICache ociCache;
+    // make it default access (only for testing)
     OciPolicyOptimizerTool(OCICache ociCache) {
         this.ociCache = ociCache;
     }
@@ -69,16 +70,19 @@ public class OciPolicyOptimizerTool {
      * @return parentMap
      */
     private Map<String, Set<String>> buildParentList(Map<String, String> parentMap) {
-        Map<String, Set<String>> map = new HashMap<>();
-        for (Map.Entry<String, String> entry : parentMap.entrySet()) {
-            String childCompartment = entry.getKey();
-            String parentCompartment = entry.getValue();
-            if (!map.containsKey(childCompartment)) {
-                map.put(childCompartment, new HashSet<>());
+        Map<String, Set<String>> result = new HashMap<>();
+        for (String child : parentMap.keySet()) {
+            Set<String> parents = new LinkedHashSet<>();
+            String currentParent = parentMap.get(child);
+
+            // climb up the hierarchy till root
+            while (currentParent != null) {
+                parents.add(currentParent);
+                currentParent = parentMap.get(currentParent);
             }
-            map.get(childCompartment).add(parentCompartment);
+            result.put(child, parents);
         }
-        return map;
+        return result;
     }
 
     /**
@@ -94,7 +98,6 @@ public class OciPolicyOptimizerTool {
     public List<PolicyStatement> helper(List<PolicyStatement> parentPolicies,
                                List<PolicyStatement> childPolicies,
                                Map<String, Set<String>> parentMap) {
-
         Iterator<PolicyStatement> childIterator = childPolicies.iterator();
         while (childIterator.hasNext()) {
             PolicyStatement childPolicy = childIterator.next();
@@ -119,20 +122,27 @@ public class OciPolicyOptimizerTool {
                     String childCompartment = childPolicy.getCompartment();
                     String parentCompartment = parentPolicy.getCompartment();
 
-                    if (parentMap.get(childCompartment).contains(parentCompartment)
-                            || childCompartment.equals(parentPolicy.getCompartment())) {
-
-                        Set<String> commonGroups = new HashSet<>(childPolicy.getGroups());
-                        commonGroups.retainAll(parentPolicy.getGroups());
-
-                        if (!commonGroups.isEmpty()) {
-                            Set<String> leftoverGroups = new HashSet<>(childPolicy.getGroups());
-                            leftoverGroups.removeAll(commonGroups);
-
-                            if (leftoverGroups.isEmpty()) {
-                                childIterator.remove();
-                            } else {
-                                childPolicy.setGroups(leftoverGroups);
+                    if (parentMap.get(childCompartment) != null) { // if child compartment is root
+                        if (parentMap.get(childCompartment).contains(parentCompartment)
+                                || childCompartment.equals(parentPolicy.getCompartment())) {
+                            logger.info("parentPolicy: " + parentPolicy);
+                            logger.info("childPolicy: " + childPolicy);
+                            Set<String> commonGroups = new HashSet<>(childPolicy.getGroups());
+                            commonGroups.retainAll(parentPolicy.getGroups());
+                            logger.info("commonGroups: " + commonGroups);
+                            if (!commonGroups.isEmpty()) {
+                                Set<String> leftoverGroups = new HashSet<>(childPolicy.getGroups());
+                                leftoverGroups.removeAll(commonGroups);
+                                if (leftoverGroups.isEmpty()) {
+                                    logger.info("Child policy removed : " + childPolicy);
+                                    childIterator.remove();
+                                    logger.info("childPolicies: " + childPolicies);
+                                    break;
+                                } else {
+                                    childPolicy.setGroups(leftoverGroups);
+                                    logger.info("leftoverGroups for child policy " + leftoverGroups);
+                                    logger.info("Child Policy after with leftoverGroups:  " + childPolicy);
+                                }
                             }
                         }
                     }
@@ -152,10 +162,14 @@ public class OciPolicyOptimizerTool {
         // get parentMap
         Map<String, String> parentMap = ociCache.getParentMap();
         Map<String, Set<String>> compartmentParentMap = buildParentList(parentMap);
+        logger.info("helper Parent Map: " + compartmentParentMap);
 
+        // comment this  (only for testing)
         String compartmentID =  fetchCompartmentNameById(compartmentName);
-        logger.info("Optimizing PolicyStatement In Compartment " + compartmentID);
+        logger.info("Optimizing PolicyStatement In CompartmentID " + compartmentID);
+        // change passing attribute to Name (only for testing)
         List<PolicyStatement> policyStatementList = new ArrayList<>(ociCache.getPolicies().get(compartmentID));
+        logger.info("Policies in Compartment " + compartmentName + " : \n" + policyStatementList);
 
         // merge duplicate policies
         List<PolicyStatement> mergedPolicies = mergeDuplicates(policyStatementList);
@@ -205,11 +219,18 @@ public class OciPolicyOptimizerTool {
         Map<String, String> parentMap = ociCache.getParentMap();
         Map<String, Set<String>> compartmentParentMap = buildParentList(parentMap);
 
+        // comment (only for testing purpose)
         List<Compartment> compartmentList = ociCache.getCompartments();
         List<String> compartments = new ArrayList<>();
         for (Compartment compartment : compartmentList) {
             compartments.add(compartment.getId());
         }
+
+        // testing list of compartments
+//        List<String> compartments = new ArrayList<>();
+//        compartments.add("A");
+//        compartments.add("root");
+//        compartments.add("B");
 
         // level one optimization (optimize self compartment policies)
         Map<String, List<PolicyStatement>> optimizedPolicyMap =
@@ -220,6 +241,7 @@ public class OciPolicyOptimizerTool {
         Map<String, List<PolicyStatement>> optimizedPolicies = new HashMap<>();
 
         for (String compartment : compartments) {
+            String currentCompartment = compartment;
             List<PolicyStatement> childPolicies = new ArrayList<>(optimizedPolicyMap.get(compartment));
             // loop till we reach root compartment
             while (parentMap.get(compartment) != null) {
@@ -230,8 +252,9 @@ public class OciPolicyOptimizerTool {
                 childPolicies = new ArrayList<>(optimizedPolicyList);
                 compartment = parentCompartment;
             }
-            optimizedPolicies.put(compartment, childPolicies);
+            optimizedPolicies.put(currentCompartment, childPolicies);
         }
+        logger.info("Optimized policies from complete tenancy: " + optimizedPolicies);
         return optimizedPolicies;
     }
 }

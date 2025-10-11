@@ -55,5 +55,11 @@ public class OCICache {
     public void addInvalidPolices(String compartmentId, List<String> invalidPolicies) {
         invalidPolicyMap.put(compartmentId, invalidPolicies);
     }
+
+    //  comment it (only for testing)
+//    public void setParentMap(Map<String, String> map) {
+//        parentMap.clear();
+//        parentMap.putAll(map);
+//    }
 }
 
