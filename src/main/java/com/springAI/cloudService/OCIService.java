@@ -30,8 +30,8 @@ public class OCIService {
     /**
      * return policies based on compartmentID
      *
-     * @param compartmentId
-     * @return
+     * @param compartmentId compartment ID
+     * @return list of polices
      */
     public List<Policy> fetchPolicyByCompartmentId(String compartmentId) {
         logger.info("Fetching policy by compartment id: " + compartmentId);
